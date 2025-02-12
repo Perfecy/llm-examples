@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""
+LM Studio Synthetic Data Generator Demo
+Генерирует синтетические тестовые данные для ФИО, Телефон, Адрес, СНИЛС и Карта
+с использованием локального LM Studio API.
+"""
+
+import json
+import itertools
+import sys
+import threading
+import time
+from openai import OpenAI
+
+# Инициализация клиента LM Studio
+client = OpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")
+MODEL = "qwen2.5-7b-instruct-1m"
+
+class Spinner:
+    """Индикатор загрузки в консоли."""
+    def __init__(self, message="Processing..."):
+        self.spinner = itertools.cycle(["-", "/", "|", "\\"])
+        self.busy = False
+        self.delay = 0.1
+        self.message = message
+        self.thread = None
+
+    def write(self, text):
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+    def _spin(self):
+        while self.busy:
+            self.write(f"\r{self.message} {next(self.spinner)}")
+            time.sleep(self.delay)
+        self.write("\r\033[K")  # Очистка строки
+
+    def __enter__(self):
+        self.busy = True
+        self.thread = threading.Thread(target=self._spin)
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.busy = False
+        time.sleep(self.delay)
+        if self.thread:
+            self.thread.join()
+        self.write("\r")
+
+def generate_synthetic_data():
+    """
+    Отправляет запрос к LM Studio для генерации синтетических данных с полями:
+      - ФИО: полное имя (например, "Иванов Иван Иванович")
+      - Телефон: номер в формате +7 XXX XXX XX XX (например, "+7 912 345-67-89")
+      - Адрес: адрес в России (например, "г. Москва, ул. Ленина, д. 1")
+      - СНИЛС: 14 цифр (например, "12345678901234")
+      - Карта: номер банковской карты (например, "1234-5678-9012-3456")
+    Ответ должен быть строго в формате JSON без дополнительных пояснений.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты ассистент, генерирующий синтетические тестовые данные для системного тестирования. "
+                "Сгенерируй один JSON-объект с точными полями и значениями:\n"
+                "  - ФИО: полное имя (например, \"Иванов Иван Иванович\")\n"
+                "  - Телефон: номер телефона в формате +7 XXX XXX XX XX (например, \"+7 912 345-67-89\")\n"
+                "  - Адрес: адрес в России (например, \"г. Москва, ул. Ленина, д. 1\")\n"
+                "  - СНИЛС: 14 цифр (например, \"12345678901234\")\n"
+                "  - Карта: номер банковской карты, 16 цифр с разделителями (например, \"1234-5678-9012-3456\")\n"
+                "Ответ должен быть строго в формате JSON, без лишнего текста."
+            )
+        }
+    ]
+
+    try:
+        with Spinner("Генерация данных..."):
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                max_tokens=150,  # Указываем максимальное число токенов
+                temperature=0.7,
+                stream=False
+            )
+
+        generated_content = response.choices[0].message.content.strip()
+        print("\nСгенерированные данные:")
+        print(generated_content)
+
+        # Проверка парсинга JSON
+        try:
+            data = json.loads(generated_content)
+            print("\nПарсинг JSON успешен. Форматированный вывод:")
+            print(json.dumps(data, ensure_ascii=False, indent=4))
+        except Exception as e:
+            print("\nОшибка при парсинге JSON:")
+            print(e)
+            print("Ответ от LM Studio:")
+            print(generated_content)
+
+    except Exception as e:
+        print("\nОшибка при вызове LM Studio API:")
+        print(e)
+
+if __name__ == "__main__":
+
+    generate_synthetic_data()
